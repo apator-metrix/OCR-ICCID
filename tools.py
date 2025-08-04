@@ -1,4 +1,5 @@
 import os
+import shutil
 from typing import Generator, Optional
 import cv2
 import easyocr
@@ -6,8 +7,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-from processing_params import CLIP, GRID, KSIZE, ALPHA, BETA, H_DENOISE, \
-    TMP_WIN_SIZE, SEARCH_WIN_SIZE
+from processing_params import CLIP, GRID, KSIZE
 
 
 class ImageProcessor:
@@ -22,25 +22,18 @@ class ImageProcessor:
         """
         try:
             k_size = params.get('k_size', KSIZE)
-            alpha = params.get('alpha', ALPHA)
-            beta = params.get('beta', BETA)
             clip = params.get('clip', CLIP)
             grid = params.get('grid', GRID)
-            h_denoise = params.get('h_denoise', H_DENOISE)
-            tmp_win_size = params.get('tmp_win_size', TMP_WIN_SIZE)
-            search_win_size = params.get('search_win_size', SEARCH_WIN_SIZE)
 
             loaded_img = self._read_img(img_path)
             cropped_img = self._crop_img(loaded_img)
-            gray_img = self._convert_to_gray(cropped_img)
-            blurred_img = self._gaussian_blur(gray_img, k_size)
-            sharpened_img = self._add_weighted(gray_img, blurred_img, alpha, beta)
-            enhanced_img = self._enhance_img(sharpened_img, clip, grid)
-            denoised_img = self._denoise_img(enhanced_img, h_denoise,
-                                             tmp_win_size, search_win_size)
+            blue_channel = cropped_img[:, :, 0]
+            enhanced_img = self._enhance_img(blue_channel, clip, grid)
+            blurred_img = self._blur(enhanced_img, k_size)
             # Image.fromarray(
-            #     denoised_img).show()  # uncomment if you want to see the processed photo
-            return os.path.basename(img_path), denoised_img
+            #     blurred_img).show()  # uncomment if you want to see the processed photo
+
+            return os.path.basename(img_path), blurred_img
         except Exception as e:
             raise RuntimeError(
                 f"Error in get_processed_image method: {e}") from e
@@ -107,31 +100,12 @@ class ImageProcessor:
             raise RuntimeError(f"Error in _convert_to_gray: {e}") from e
 
     @staticmethod
-    def _gaussian_blur(gray_img: np.ndarray, k: tuple[int, int]) -> np.ndarray:
-        """Apply Gaussian blur to an image."""
+    def _blur(img: np.ndarray, k_size: int) -> np.ndarray:
+        """Apply blur to an image."""
         try:
-            return cv2.GaussianBlur(gray_img, k, 0)
+            return cv2.medianBlur(img, k_size)
         except Exception as e:
-            raise RuntimeError(f"Error in _gaussian_blur: {e}") from e
-
-    @staticmethod
-    def _denoise_img(img: np.ndarray, h: int | float, tmp_win_size: int, search_win_size: int) -> np.ndarray:
-        """Apply denoising to an image."""
-        try:
-            return cv2.fastNlMeansDenoising(img, None, h=h,
-                                           templateWindowSize=tmp_win_size,
-                                           searchWindowSize=search_win_size)
-        except Exception as e:
-            raise RuntimeError(f"Error in _gaussian_blur: {e}") from e
-
-    @staticmethod
-    def _add_weighted(gray_img: np.ndarray, blurred_img: np.ndarray,
-                      alpha: float, beta: float) -> np.ndarray:
-        """Blend two images using weighted addition."""
-        try:
-            return cv2.addWeighted(gray_img, alpha, blurred_img, beta, 0)
-        except Exception as e:
-            raise RuntimeError(f"Error in _add_weighted: {e}") from e
+            raise RuntimeError(f"Error in _blur: {e}") from e
 
     @staticmethod
     def _enhance_img(sharpened_img: np.ndarray, clip: float,
@@ -142,15 +116,6 @@ class ImageProcessor:
             return clahe.apply(sharpened_img)
         except Exception as e:
             raise RuntimeError(f"Error in _enhance_img: {e}") from e
-
-    @staticmethod
-    def _resize_for_ocr(img: np.ndarray) -> np.ndarray:
-        """Resize image to improve OCR accuracy."""
-        try:
-            return cv2.resize(img, (0, 0), fx=2.0, fy=2.0,
-                              interpolation=cv2.INTER_CUBIC)
-        except Exception as e:
-            raise RuntimeError(f"Error in _resize_for_ocr: {e}") from e
 
     @staticmethod
     def reported_img_filter(file: str, report_file: str) -> bool:
@@ -183,11 +148,12 @@ class ICCIDReader:
         reader = easyocr.Reader(['en'], gpu=False, verbose=False)
         results = reader.readtext(img)
         try:
+            confidence = results[1][-1] * 100
             iccid_p1 = results[0][1] if iccid_no_p1 is None else iccid_no_p1
             iccid_p2 = results[1][1]
             iccid = iccid_p1 + iccid_p2
-            # print(iccid)
-            if self._checksum(iccid):
+            if self._checksum(iccid) and confidence >= 90:
+                print(f"==============> {iccid} dopasowano z pewnością {round(confidence, 1)}% <===============")
                 return iccid
         except Exception as e:
             print(f"Error in get_iccid: {e}")
@@ -215,7 +181,10 @@ class ICCIDReader:
                     total += digit
 
             calculated_checksum = (10 - (total % 10)) % 10
-            return calculated_checksum == check_digit
+            checksum_matching = calculated_checksum == check_digit
+            if not checksum_matching:
+                print(f"Checksums mismatched for: {iccid}")
+            return checksum_matching
         except Exception as e:
             print(f"Error in _checksum method: {e}")
             return False
@@ -302,3 +271,29 @@ class CSVICCIDUpdater:
             combined.to_csv("full_iccid.csv", index=False, sep=';')
         except IOError as e:
             print(f"Error saving combined CSV file: {e}")
+
+
+def move_images_base_on_report(report, start_path, end_path):
+    with open(report, "r") as file:
+        for line in file:
+            img_name = line.split("->")[0].strip()
+            full_path_img = os.path.join(start_path, img_name)
+            shutil.copy(full_path_img, end_path)
+
+def get_num_of_updated_rows(csv_file):
+    df = pd.read_csv(csv_file, sep=';')
+    counts = df['pcbNumberSerial'].count()
+    print(counts)
+
+
+def get_report_updates_missing_in_csv(report_updated_rows: str, csv_file: str) -> list:
+    list_missing_positions = []
+    df = pd.read_csv(csv_file, encoding="utf-8", sep=';')
+    with open(report_updated_rows, "r", encoding="utf-8") as file:
+        for line in file:
+            img_name = line.split("->")[0].strip()
+            pcb = img_name.rsplit(".", 1)[0][4:]
+            found = df.astype(str).apply(lambda col: col.str.contains(pcb, na=False)).any().any()
+            if not found:
+                list_missing_positions.append(f"IS11{pcb}.jpg")
+    return list_missing_positions

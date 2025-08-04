@@ -1,6 +1,5 @@
 import os.path
 import argparse
-import sys
 import warnings
 from datetime import datetime
 
@@ -61,8 +60,6 @@ def parse_args():
         type=str,
         help="Pierwsza część numeru ICCID (dla poprawy wyników jeśli pewna jest pierwsza część numeru)"
     )
-
-
     return parser.parse_args()
 
 
