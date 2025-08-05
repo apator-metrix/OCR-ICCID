@@ -273,27 +273,43 @@ class CSVICCIDUpdater:
             print(f"Error saving combined CSV file: {e}")
 
 
-def move_images_base_on_report(report, start_path, end_path):
-    with open(report, "r") as file:
-        for line in file:
-            img_name = line.split("->")[0].strip()
-            full_path_img = os.path.join(start_path, img_name)
-            shutil.copy(full_path_img, end_path)
+def move_images_based_on_report(report: str, start_path: str, end_path: str) -> None:
+    """Copies images listed in the report file from start_path to end_path."""
+    try:
+        with open(report, "r", encoding="utf-8") as file:
+            for line in file:
+                img_name = line.split("->")[0].strip()
+                full_path_img = os.path.join(start_path, img_name)
+                if os.path.isfile(full_path_img):
+                    shutil.copy(full_path_img, end_path)
+                else:
+                    print(f"File not found: {full_path_img}")
+    except Exception as e:
+        print(f"Error while moving images: {e}")
 
-def get_num_of_updated_rows(csv_file):
-    df = pd.read_csv(csv_file, sep=';')
-    counts = df['pcbNumberSerial'].count()
-    print(counts)
+def get_num_of_updated_rows(csv_file: str) -> int:
+    """Returns and prints the number of non-empty 'pcbNumberSerial' rows in the CSV file."""
+    try:
+        df = pd.read_csv(csv_file, sep=';', encoding='utf-8')
+        counts = df['pcbNumberSerial'].count()
+        print(counts)
+        return counts
+    except Exception as e:
+        print(f"Error reading CSV file: {e}")
+        return 0
 
-
-def get_report_updates_missing_in_csv(report_updated_rows: str, csv_file: str) -> list:
+def get_report_updates_missing_in_csv(report_updated_rows: str, csv_file: str) -> list[str]:
+    """Returns a list of image filenames from the report not found in any column of the CSV."""
     list_missing_positions = []
-    df = pd.read_csv(csv_file, encoding="utf-8", sep=';')
-    with open(report_updated_rows, "r", encoding="utf-8") as file:
-        for line in file:
-            img_name = line.split("->")[0].strip()
-            pcb = img_name.rsplit(".", 1)[0][4:]
-            found = df.astype(str).apply(lambda col: col.str.contains(pcb, na=False)).any().any()
-            if not found:
-                list_missing_positions.append(f"IS11{pcb}.jpg")
+    try:
+        df = pd.read_csv(csv_file, encoding="utf-8", sep=';')
+        with open(report_updated_rows, "r", encoding="utf-8") as file:
+            for line in file:
+                img_name = line.split("->")[0].strip()
+                pcb = img_name.rsplit(".", 1)[0][4:]
+                found = df.astype(str).apply(lambda col: col.str.contains(pcb, na=False)).any().any()
+                if not found:
+                    list_missing_positions.append(f"IS11{pcb}.jpg")
+    except Exception as e:
+        print(f"Error processing files: {e}")
     return list_missing_positions

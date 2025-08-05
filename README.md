@@ -1,18 +1,15 @@
 # OCR-ICCID
 
-
-Narzędzie służące do automatycznego odczytu numerów ICCID ze zdjęć (np. etykiet) za pomocą OCR i aktualizacji pliku CSV z tymi danymi. Program przetwarza obrazy, wyciąga numery ICCID, weryfikuje ich poprawność i wstawia je do odpowiednich rekordów CSV, zapisując też logi z przebiegu operacji.
+Narzędzie służące do automatycznego odczytu numerów ICCID ze zdjęć za pomocą biblioteki easyOcr i do aktualizacji numeru pcb w  pliku CSV. Program przetwarza obrazy, wyciąga numery ICCID, weryfikuje ich poprawność i wstawia numer pcb do odpowiednich rekordów CSV.
 Funkcje:
 
- - Przetwarzanie zdjęć w podanym folderze lub na podstawie wskazanego raportu.
+ - Przetwarzanie zdjęć w podanym folderze
 
  - Odczyt ICCID z obrazów za pomocą EasyOCR.
 
  - Weryfikacja poprawności ICCID (algorytm Luhna).
 
  - Aktualizacja kolumny pcbNumberSerial w pliku CSV.
-
- - Tworzenie szczegółowych logów operacji.
 
 ### Wymagania:
 
@@ -36,12 +33,19 @@ Zainstaluj wymagane biblioteki korzystając z pliku requirements.txt:
 
 ### Uruchomienie
 
-    python main.py --path_to_images /home/mariusz/Pulpit/292025 --path_to_csv /home/mariusz/Pulpit/full_iccid.csv --batch 1
+    python main.py --path_to_images /home/mariusz/Pulpit/292025 --path_to_csv /home/mariusz/Pulpit/full_iccid.csv
 
-### Opcjonalne argumenty
+###  Argumenty
+    --path_to_images: ścieżka do folderu z zdjęciami
 
-    --file_type: lista rozszerzeń plików do przetwarzania (domyślnie .jpg .png .jpeg).
+    --path_to_csv: ścieżka do pliku csv, który ma być zaktualizowany
+
+#### opcjonalne
+
+    --file_type: lista rozszerzeń plików do przetwarzania (domyślnie .jpg .png .jpeg). (opcjo
 
     --batch: liczba zdjęć do przetworzenia (np. --batch 100).
+
+    --iccid_no_p1: można podać pierwsze 10 znaków numeru ICCID (dla poprawy wyników jeśli ta wartość jest niezmienna)
 
     --use_reported_img: ścieżka do pliku raportu z listą zdjęć do przeanalizowania, wyciągnię tylko zdjęcia będące na liście z ścieżki podaje w --path_to_images
