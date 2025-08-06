@@ -313,3 +313,32 @@ def get_report_updates_missing_in_csv(report_updated_rows: str, csv_file: str) -
     except Exception as e:
         print(f"Error processing files: {e}")
     return list_missing_positions
+
+
+def get_file_missing_in_csv(file_path: str, csv_file: str) -> list[str]:
+    """Returns a list of image filenames from the directory not found in any column of the CSV."""
+    list_missing_positions = []
+    try:
+        df = pd.read_csv(csv_file, encoding="utf-8", sep=';')
+        for filename in os.listdir(file_path):
+            if filename.lower().endswith('.jpg'):
+                pcb = filename.rsplit(".", 1)[0][4:]
+                found = df.astype(str).apply(lambda col: col.str.contains(pcb, na=False)).any().any()
+                if not found:
+                    list_missing_positions.append(f"IS11{pcb}.jpg")
+    except Exception as e:
+        print(f"Error processing files: {e}")
+    return list_missing_positions
+
+
+def find_duplicates(report_updated_path):
+    with open(report_updated_path, 'r') as file:
+        text = file.read()
+
+    with open(report_updated_path, 'r') as file2:
+
+        for line in file2:
+            iccid = line.split('->')[1].strip()
+            count = text.count(iccid)
+            if count > 1:
+                print(iccid)
