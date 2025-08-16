@@ -120,7 +120,7 @@ def main():
                     break
             if iccid:
                 iccid_readable_counter += 1
-                is_updated = csv_updater.update_csv(pcb_base, filename, iccid)
+                is_updated = csv_updater.create_new_csv_with_updated_rows(pcb_base, filename, iccid)
                 if not is_updated:
                     iccid_not_found_in_cdv_counter += 1
                     csv_updater.logger(filename, dt_now_str,

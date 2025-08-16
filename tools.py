@@ -211,15 +211,26 @@ class CSVICCIDUpdater:
             raise RuntimeError(
                 f"Unexpected error while loading CSV: {csv_path}\nDetails: {e}")
 
-    def update_csv(self, pcb_base: str, filename: str, iccid: str) -> bool:
+    def create_new_csv_with_updated_rows(self, pcb_base: str, filename: str, iccid: str) -> bool:
         """
-        Updates the 'pcbNumberSerial' column for rows matching the given ICCID.
+        Creates a new CSV file with updated 'pcbNumberSerial' column
+        for rows matching the given ICCID.
+        If the same pcbNumberSerial already exists in the output file,
+        it won't be added again.
         """
         pcb_number_serial = filename.rsplit(".", 1)[0] if pcb_base in filename else self._prepare_pcb_number_serial(pcb_base, filename)
-        mask = self.df['ICCID'].str.contains(iccid, na=False)
+        mask = self.df['ICCID'].astype(str).str.contains(iccid, na=False)
         if mask.any():
-            self.df.loc[mask, 'pcbNumberSerial'] = pcb_number_serial
-            self.df.to_csv(self.csv_path, index=False, sep=';')
+            updated_rows = self.df.loc[mask].copy()
+            updated_rows['pcbNumberSerial'] = pcb_number_serial
+            output_path = f"{self.csv_path.rsplit('.', 1)[0]}_matched.csv"
+            file_exists = os.path.isfile(output_path)
+            if file_exists:
+                existing_df = pd.read_csv(output_path, sep=';')
+                if pcb_number_serial in existing_df['pcbNumberSerial'].astype(
+                        str).values:
+                    return False
+            updated_rows.to_csv(output_path, index=False, sep=';', mode='a', header=not file_exists)
             return True
         return False
 
