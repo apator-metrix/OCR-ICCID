@@ -1,5 +1,5 @@
 # blur
-KSIZE = 5
+KSIZE = 3
 
 # weight
 ALPHA = 2
@@ -14,10 +14,6 @@ H_DENOISE = 0.0001
 TMP_WIN_SIZE = 1
 SEARCH_WIN_SIZE = 1
 
-custom_params = {
-    "default": {}
-}
-
 base_configs = [
     {"clip": 2.5, "grid": (4, 4)},
     {"clip": 4,   "grid": (6, 6)},
@@ -27,13 +23,26 @@ base_configs = [
 ]
 
 k_sizes = [5, 7, 9]
-
 counter = 1
+base_params = {}
+
 for k_size in k_sizes:
     for config in base_configs:
-        custom_params[counter] = {
+        base_params[counter] = {
             "k_size": k_size,
             "clip": config["clip"],
             "grid": config["grid"]
         }
         counter += 1
+
+custom_params = {
+    "silver": {
+        "default": {}
+    },
+    "blue": {
+        "default": {}
+    }
+}
+
+# custom_params["silver"].update(base_params)
+custom_params["blue"].update(base_params)

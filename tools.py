@@ -15,7 +15,7 @@ class ImageProcessor:
     Provides methods for reading, preprocessing, and filtering images for OCR.
     """
 
-    def get_processed_image(self, img_path: str, params: dict) -> tuple[str, any]:
+    def get_processed_image(self, img_path: str, params: dict, img_package: str = 'blue') -> tuple[str, any]:
         """
         Processes an image from a given path using specified parameters.
         Returns the image filename and the processed image.
@@ -26,14 +26,39 @@ class ImageProcessor:
             grid = params.get('grid', GRID)
 
             loaded_img = self._read_img(img_path)
-            cropped_img = self._crop_img(loaded_img)
-            blue_channel = cropped_img[:, :, 0]
-            enhanced_img = self._enhance_img(blue_channel, clip, grid)
-            blurred_img = self._blur(enhanced_img, k_size)
+
+            if img_package == "silver":
+                rotated_img = self._rotate_img(loaded_img, angle=2.5)
+                cropped_img = self._crop_img(rotated_img, top_k=0.1, bottom_k=0.9, left_k=0.15, right_k=0.9)
+                b, g, r = cv2.split(cropped_img)
+
+                r = cv2.addWeighted(r, 1.3, r, 0, 0)
+                g = cv2.addWeighted(g, 0.9, g, 0, 0)
+                b = cv2.addWeighted(b, 3.0, b, 0, 0)
+
+                color_modified = cv2.merge([b, g, r])
+
+                gray_img = color_modified[:, :, 0]
+                enhanced_img = self._enhance_img(gray_img, clip, grid)
+
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+                kernel2 = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+                thicker = cv2.dilate(enhanced_img, kernel, iterations=1)
+                thicker = cv2.erode(thicker, kernel2, iterations=1)
+                blurred_img = self._blur(thicker, k_size)
+                inverted = cv2.bitwise_not(blurred_img)
+                Image.fromarray(inverted).show()
+                return os.path.basename(img_path), inverted
+
+            elif img_package == "blue":
+                cropped_img = self._crop_img(loaded_img)
+                gray_img = cropped_img[:, :, 0]
+                enhanced_img = self._enhance_img(gray_img, clip, grid)
+                blurred_img = self._blur(enhanced_img, k_size)
+                Image.fromarray(blurred_img).show()
             # Image.fromarray(
             #     blurred_img).show()  # uncomment if you want to see the processed photo
-
-            return os.path.basename(img_path), blurred_img
+                return os.path.basename(img_path), blurred_img
         except Exception as e:
             raise RuntimeError(
                 f"Error in get_processed_image method: {e}") from e
@@ -76,20 +101,32 @@ class ImageProcessor:
         return img
 
     @staticmethod
-    def _crop_img(loaded_img: np.ndarray) -> np.ndarray:
+    def _crop_img(loaded_img: np.ndarray, top_k: float=0.37, bottom_k: float= 0.64, left_k: float = 0.19, right_k: float = 0.82) -> np.ndarray:
         """
         Crops the central region of the image based on fixed percentage ratios.
         """
         try:
             height, width = loaded_img.shape[:2]
-            top = int(0.37 * height)
-            bottom = int(0.64 * height)
-            left = int(0.19 * width)
-            right = int(0.82 * width)
+            top = int(top_k * height)
+            bottom = int(bottom_k * height)
+            left = int(left_k * width)
+            right = int(right_k * width)
             cropped_img = loaded_img[top:bottom, left:right]
         except Exception as e:
             raise RuntimeError(f"Error in _crop_img method: {e}") from e
         return cropped_img
+
+    @staticmethod
+    def _rotate_img(loaded_img: np.ndarray, angle: float = 0,
+                    scale: float = 1) -> np.ndarray:
+        try:
+            h, w = loaded_img.shape[:2]
+            center = (w // 2, h // 2)
+            m = cv2.getRotationMatrix2D(center, angle, scale)
+            rotated_img = cv2.warpAffine(loaded_img, m, (w, h))
+        except Exception as e:
+            raise RuntimeError(f"Error in _rotate_img method: {e}") from e
+        return rotated_img
 
     @staticmethod
     def _convert_to_gray(cropped_img: np.ndarray) -> np.ndarray:
@@ -146,12 +183,14 @@ class ICCIDReader:
         Extracts and returns a valid ICCID string from the given image.
         """
         reader = easyocr.Reader(['en'], gpu=False, verbose=False)
-        results = reader.readtext(img)
+        results = reader.readtext(img, allowlist="0123456789")
         try:
             confidence = results[1][-1] * 100
             iccid_p1 = results[0][1] if iccid_no_p1 is None else iccid_no_p1
             iccid_p2 = results[1][1]
             iccid = iccid_p1 + iccid_p2
+            print(
+                f"INFO ==============> {iccid} dopasowano z pewnością {round(confidence, 1)}% <===============")
             if self._checksum(iccid) and confidence >= 90:
                 print(f"==============> {iccid} dopasowano z pewnością {round(confidence, 1)}% <===============")
                 return iccid
@@ -353,3 +392,24 @@ def find_duplicates(report_updated_path):
             count = text.count(iccid)
             if count > 1:
                 print(iccid)
+
+
+
+
+
+            # if img_package == "silver":
+            #     rotated_img = self._rotate_img(loaded_img, angle=2.5)
+            #     cropped_img = self._crop_img(rotated_img, top_k=0.1, bottom_k=0.9)
+            #     b, g, r = cv2.split(cropped_img)
+            #
+            #     r = cv2.addWeighted(r, 1.3, r, 0, 20)  # wzmocnij czerwony
+            #     g = cv2.addWeighted(g, 0.9, g, 0, 60)  # lekko osłab zielony
+            #     b = cv2.addWeighted(b, 2.0, b, 0, 0)  # zostaw niebieski
+            #
+            #     color_modified = cv2.merge([b, g, r])
+            #
+            #     gray_img = color_modified[:, :, 0]
+            #     enhanced_img = self._enhance_img(gray_img, clip, grid)
+            #     blurred_img = self._blur(enhanced_img, k_size)
+            #     Image.fromarray(color_modified).show()
+            #     return os.path.basename(img_path), blurred_img

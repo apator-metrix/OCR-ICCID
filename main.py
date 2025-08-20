@@ -4,7 +4,8 @@ import warnings
 from datetime import datetime
 
 from processing_params import custom_params
-from tools import ImageProcessor, ICCIDReader, CSVICCIDUpdater
+from tools import ImageProcessor, ICCIDReader, CSVICCIDUpdater, \
+    move_images_based_on_report
 
 # Disable warnings for pin_memory
 warnings.filterwarnings("ignore", message=".*pin_memory.*",
@@ -60,6 +61,13 @@ def parse_args():
         type=str,
         help="Pierwsza część numeru ICCID (dla poprawy wyników jeśli pewna jest pierwsza część numeru)"
     )
+
+    parser.add_argument(
+        "--img_package",
+        choices=["blue", "silver"],
+        default="blue",
+        help="Wybierz kolor zdjęć do obróbki"
+    )
     return parser.parse_args()
 
 
@@ -73,6 +81,8 @@ def main():
     path_to_images = args.path_to_images
     path_to_csv = args.path_to_csv
     batch = args.batch
+
+    img_package = args.img_package
 
     pcb_base = args.pcb_base
     iccid_no_p1 = args.iccid_no_p1
@@ -112,9 +122,9 @@ def main():
             print(f"{idx}/{num_of_images_to_process}: {os.path.basename(file)}")
             iccid_processed_counter += 1
             iccid = None
-            for params in custom_params.values():
+            for params in custom_params[img_package].values():
                 filename, processed_image = image_processor.get_processed_image(
-                    file, params)
+                    file, params, img_package)
                 iccid = iccid_reader.get_iccid(processed_image, iccid_no_p1)
                 if iccid:
                     break
@@ -145,3 +155,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # move_images_based_on_report("reports/2025-08-20_11-42-55_logs_iccid_unreadable.txt","/home/mariusz/Pulpit/silver_img", "/home/mariusz/Pulpit/very_bad_img")
