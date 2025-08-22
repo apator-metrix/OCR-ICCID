@@ -4,7 +4,8 @@ import warnings
 from datetime import datetime
 
 from processing_params import custom_params
-from tools import ImageProcessor, ICCIDReader, CSVICCIDUpdater
+from tools import ImageProcessor, ICCIDReader, CSVICCIDUpdater, \
+    move_images_based_on_report
 
 # Disable warnings for pin_memory
 warnings.filterwarnings("ignore", message=".*pin_memory.*",
@@ -43,9 +44,16 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--batch",
+        "--start",
         type=int,
-        help="Liczba zdjęć jaką chcemy sprawdzić"
+        default=1,
+        help="Indeks zdjęcia, od którego chcemy zacząć (zaczynamy od 1, nie od 0)"
+    )
+
+    parser.add_argument(
+        "--stop",
+        type=int,
+        help="Indeks zdjęcia, na którym chcemy zakończyć"
     )
 
     parser.add_argument(
@@ -60,6 +68,13 @@ def parse_args():
         type=str,
         help="Pierwsza część numeru ICCID (dla poprawy wyników jeśli pewna jest pierwsza część numeru)"
     )
+
+    parser.add_argument(
+        "--img_package",
+        choices=["blue", "silver"],
+        default="blue",
+        help="Wybierz kolor zdjęć do obróbki"
+    )
     return parser.parse_args()
 
 
@@ -72,7 +87,10 @@ def main():
     path_to_report = args.use_reported_img
     path_to_images = args.path_to_images
     path_to_csv = args.path_to_csv
-    batch = args.batch
+    start = args.start
+    stop = args.stop
+
+    img_package = args.img_package
 
     pcb_base = args.pcb_base
     iccid_no_p1 = args.iccid_no_p1
@@ -100,27 +118,29 @@ def main():
     iccid_unreadable_counter = 0
     iccid_readable_counter = 0
 
-    num_of_images_to_process = batch if batch else image_processor.count_image_files(
-        path_to_images, file_type) # do poprawy pod kątem batch i zdjec z raportu
+    num_of_images_to_process = stop if stop else image_processor.count_image_files(
+        path_to_images, file_type)
 
     print("Rozpoczęcie przetwarzania zdjęć i aktualizowania pliku csv...")
     for idx, file in enumerate(iter_image_paths, 1):
-        if batch:
-            if idx > batch:
+        if idx < start:
+            continue
+        if stop:
+            if idx > stop:
                 break
         try:
             print(f"{idx}/{num_of_images_to_process}: {os.path.basename(file)}")
             iccid_processed_counter += 1
             iccid = None
-            for params in custom_params.values():
+            for params in custom_params[img_package].values():
                 filename, processed_image = image_processor.get_processed_image(
-                    file, params)
+                    file, params, img_package)
                 iccid = iccid_reader.get_iccid(processed_image, iccid_no_p1)
                 if iccid:
                     break
             if iccid:
                 iccid_readable_counter += 1
-                is_updated = csv_updater.update_csv(pcb_base, filename, iccid)
+                is_updated = csv_updater.create_new_csv_with_updated_rows(pcb_base, filename, iccid)
                 if not is_updated:
                     iccid_not_found_in_cdv_counter += 1
                     csv_updater.logger(filename, dt_now_str,
@@ -145,3 +165,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # move_images_based_on_report("reports/2025-08-21_01-35-12_logs_iccid_unreadable.txt","/home/mariusz/Pulpit/zdjecia_u_12", "/home/mariusz/Pulpit/bad_img")

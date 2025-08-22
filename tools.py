@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-from processing_params import CLIP, GRID, KSIZE
+from processing_params import CLIP, GRID, KSIZE, KSIZE_2, B_ALPHA
 
 
 class ImageProcessor:
@@ -15,25 +15,41 @@ class ImageProcessor:
     Provides methods for reading, preprocessing, and filtering images for OCR.
     """
 
-    def get_processed_image(self, img_path: str, params: dict) -> tuple[str, any]:
+    def get_processed_image(self, img_path: str, params: dict, img_package: str = 'blue') -> tuple[str, any]:
         """
         Processes an image from a given path using specified parameters.
         Returns the image filename and the processed image.
         """
         try:
             k_size = params.get('k_size', KSIZE)
+            k_size_2 = params.get('k_size_2', KSIZE_2)
+            b_alpha = params.get('b_alpha', B_ALPHA)
             clip = params.get('clip', CLIP)
             grid = params.get('grid', GRID)
 
             loaded_img = self._read_img(img_path)
-            cropped_img = self._crop_img(loaded_img)
-            blue_channel = cropped_img[:, :, 0]
-            enhanced_img = self._enhance_img(blue_channel, clip, grid)
-            blurred_img = self._blur(enhanced_img, k_size)
-            # Image.fromarray(
-            #     blurred_img).show()  # uncomment if you want to see the processed photo
 
-            return os.path.basename(img_path), blurred_img
+            if img_package == "silver":
+                rotated_img = self._rotate_img(loaded_img, angle=2.5)
+                cropped_img = self._crop_img(rotated_img, top_k=0.1, bottom_k=0.9, left_k=0.15, right_k=0.96)
+                color_modified_img = self._modify_img_color(cropped_img, b_alpha)
+                gray_img = color_modified_img[:, :, 0]
+                enhanced_img = self._enhance_img(gray_img, clip, grid)
+
+                thicker_img = self._thick_img(enhanced_img, k_size_2)
+                blurred_img = self._blur(thicker_img, k_size)
+                inverted = cv2.bitwise_not(blurred_img)
+                # Image.fromarray(inverted).show() # uncomment if you want to see the processed photo
+                return os.path.basename(img_path), inverted
+
+            elif img_package == "blue":
+                cropped_img = self._crop_img(loaded_img, right_k=0.84)
+                gray_img = cropped_img[:, :, 0]
+                enhanced_img = self._enhance_img(gray_img, clip, grid)
+                blurred_img = self._blur(enhanced_img, k_size)
+                # Image.fromarray(
+                #     blurred_img).show()  # uncomment if you want to see the processed photo
+                return os.path.basename(img_path), blurred_img
         except Exception as e:
             raise RuntimeError(
                 f"Error in get_processed_image method: {e}") from e
@@ -76,20 +92,41 @@ class ImageProcessor:
         return img
 
     @staticmethod
-    def _crop_img(loaded_img: np.ndarray) -> np.ndarray:
+    def _crop_img(loaded_img: np.ndarray, top_k: float=0.37, bottom_k: float= 0.64, left_k: float = 0.19, right_k: float = 0.82) -> np.ndarray:
         """
         Crops the central region of the image based on fixed percentage ratios.
         """
         try:
             height, width = loaded_img.shape[:2]
-            top = int(0.37 * height)
-            bottom = int(0.64 * height)
-            left = int(0.19 * width)
-            right = int(0.82 * width)
+            top = int(top_k * height)
+            bottom = int(bottom_k * height)
+            left = int(left_k * width)
+            right = int(right_k * width)
             cropped_img = loaded_img[top:bottom, left:right]
         except Exception as e:
             raise RuntimeError(f"Error in _crop_img method: {e}") from e
         return cropped_img
+
+    @staticmethod
+    def _rotate_img(loaded_img: np.ndarray, angle: float = 0,
+                    scale: float = 1) -> np.ndarray:
+        try:
+            h, w = loaded_img.shape[:2]
+            center = (w // 2, h // 2)
+            m = cv2.getRotationMatrix2D(center, angle, scale)
+            rotated_img = cv2.warpAffine(loaded_img, m, (w, h))
+        except Exception as e:
+            raise RuntimeError(f"Error in _rotate_img method: {e}") from e
+        return rotated_img
+
+    @staticmethod
+    def _thick_img(enhanced_img, k_size_2):
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        kernel2 = cv2.getStructuringElement(cv2.MORPH_RECT,
+                                            (k_size_2, k_size_2))
+        thicker = cv2.dilate(enhanced_img, kernel, iterations=1)
+        thicker = cv2.erode(thicker, kernel2, iterations=1)
+        return thicker
 
     @staticmethod
     def _convert_to_gray(cropped_img: np.ndarray) -> np.ndarray:
@@ -98,6 +135,15 @@ class ImageProcessor:
             return cv2.cvtColor(cropped_img, cv2.COLOR_BGR2GRAY)
         except Exception as e:
             raise RuntimeError(f"Error in _convert_to_gray: {e}") from e
+
+    @staticmethod
+    def _modify_img_color(cropped_img, b_alpha):
+        b, g, r = cv2.split(cropped_img)
+        r = cv2.addWeighted(r, 0.1, r, 0, 0)
+        g = cv2.addWeighted(g, 0.1, g, 0, 0)
+        b = cv2.addWeighted(b, b_alpha, b, 0, 0)
+        color_modified = cv2.merge([b, g, r])
+        return color_modified
 
     @staticmethod
     def _blur(img: np.ndarray, k_size: int) -> np.ndarray:
@@ -146,14 +192,19 @@ class ICCIDReader:
         Extracts and returns a valid ICCID string from the given image.
         """
         reader = easyocr.Reader(['en'], gpu=False, verbose=False)
-        results = reader.readtext(img)
+        results = reader.readtext(img, allowlist="0123456789")
         try:
+            if len(results) > 2:
+                idx = 1
+            else:
+                idx = 0
             confidence = results[1][-1] * 100
-            iccid_p1 = results[0][1] if iccid_no_p1 is None else iccid_no_p1
-            iccid_p2 = results[1][1]
+            iccid_p1 = results[idx][1] if iccid_no_p1 is None else iccid_no_p1
+            iccid_p2 = results[idx+1][1]
             iccid = iccid_p1 + iccid_p2
+            print(
+                f"INFO ==============> {iccid} dopasowano z pewnością {round(confidence, 1)}% {'\u274C' if confidence < 90 else '\u2705'} <===============")
             if self._checksum(iccid) and confidence >= 90:
-                print(f"==============> {iccid} dopasowano z pewnością {round(confidence, 1)}% <===============")
                 return iccid
         except Exception as e:
             print(f"Error in get_iccid: {e}")
@@ -201,7 +252,12 @@ class CSVICCIDUpdater:
         self.csv_path = csv_path
         try:
             self.df = pd.read_csv(csv_path, sep=';',
-                                  dtype={'pcbNumberSerial': str})
+                                  dtype={
+                                      'pcbNumberSerial': str,
+                                      'MSISDN': str,
+                                      'APN': str,
+                                      'ADRES_IP': str,
+                                  })
         except FileNotFoundError:
             raise FileNotFoundError(f"CSV file not found at path: {csv_path}")
         except pd.errors.ParserError as e:
@@ -211,15 +267,26 @@ class CSVICCIDUpdater:
             raise RuntimeError(
                 f"Unexpected error while loading CSV: {csv_path}\nDetails: {e}")
 
-    def update_csv(self, pcb_base: str, filename: str, iccid: str) -> bool:
+    def create_new_csv_with_updated_rows(self, pcb_base: str, filename: str, iccid: str) -> bool:
         """
-        Updates the 'pcbNumberSerial' column for rows matching the given ICCID.
+        Creates a new CSV file with updated 'pcbNumberSerial' column
+        for rows matching the given ICCID.
+        If the same pcbNumberSerial already exists in the output file,
+        it won't be added again.
         """
         pcb_number_serial = filename.rsplit(".", 1)[0] if pcb_base in filename else self._prepare_pcb_number_serial(pcb_base, filename)
-        mask = self.df['ICCID'].str.contains(iccid, na=False)
+        mask = self.df['ICCID'].astype(str).str.contains(iccid, na=False)
         if mask.any():
-            self.df.loc[mask, 'pcbNumberSerial'] = pcb_number_serial
-            self.df.to_csv(self.csv_path, index=False, sep=';')
+            updated_rows = self.df.loc[mask].copy()
+            updated_rows['pcbNumberSerial'] = pcb_number_serial
+            output_path = f"{self.csv_path.rsplit('.', 1)[0]}_matched.csv"
+            file_exists = os.path.isfile(output_path)
+            if file_exists:
+                existing_df = pd.read_csv(output_path, sep=';')
+                if pcb_number_serial in existing_df['pcbNumberSerial'].astype(
+                        str).values:
+                    return False
+            updated_rows.to_csv(output_path, index=False, sep=';', mode='a', header=not file_exists)
             return True
         return False
 
@@ -313,3 +380,32 @@ def get_report_updates_missing_in_csv(report_updated_rows: str, csv_file: str) -
     except Exception as e:
         print(f"Error processing files: {e}")
     return list_missing_positions
+
+
+def get_file_missing_in_csv(file_path: str, csv_file: str) -> list[str]:
+    """Returns a list of image filenames from the directory not found in any column of the CSV."""
+    list_missing_positions = []
+    try:
+        df = pd.read_csv(csv_file, encoding="utf-8", sep=';')
+        for filename in os.listdir(file_path):
+            if filename.lower().endswith('.jpg'):
+                pcb = filename.rsplit(".", 1)[0][4:]
+                found = df.astype(str).apply(lambda col: col.str.contains(pcb, na=False)).any().any()
+                if not found:
+                    list_missing_positions.append(f"IS11{pcb}.jpg")
+    except Exception as e:
+        print(f"Error processing files: {e}")
+    return list_missing_positions
+
+
+def find_duplicates(report_updated_path):
+    with open(report_updated_path, 'r') as file:
+        text = file.read()
+
+    with open(report_updated_path, 'r') as file2:
+
+        for line in file2:
+            iccid = line.split('->')[1].strip()
+            count = text.count(iccid)
+            if count > 1:
+                print(iccid)
