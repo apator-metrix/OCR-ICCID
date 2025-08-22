@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-from processing_params import CLIP, GRID, KSIZE
+from processing_params import CLIP, GRID, KSIZE, KSIZE_2, B_ALPHA
 
 
 class ImageProcessor:
@@ -22,6 +22,8 @@ class ImageProcessor:
         """
         try:
             k_size = params.get('k_size', KSIZE)
+            k_size_2 = params.get('k_size_2', KSIZE_2)
+            b_alpha = params.get('b_alpha', B_ALPHA)
             clip = params.get('clip', CLIP)
             grid = params.get('grid', GRID)
 
@@ -29,35 +31,24 @@ class ImageProcessor:
 
             if img_package == "silver":
                 rotated_img = self._rotate_img(loaded_img, angle=2.5)
-                cropped_img = self._crop_img(rotated_img, top_k=0.1, bottom_k=0.9, left_k=0.15, right_k=0.9)
-                b, g, r = cv2.split(cropped_img)
-
-                r = cv2.addWeighted(r, 1.3, r, 0, 0)
-                g = cv2.addWeighted(g, 0.9, g, 0, 0)
-                b = cv2.addWeighted(b, 3.0, b, 0, 0)
-
-                color_modified = cv2.merge([b, g, r])
-
-                gray_img = color_modified[:, :, 0]
+                cropped_img = self._crop_img(rotated_img, top_k=0.1, bottom_k=0.9, left_k=0.15, right_k=0.96)
+                color_modified_img = self._modify_img_color(cropped_img, b_alpha)
+                gray_img = color_modified_img[:, :, 0]
                 enhanced_img = self._enhance_img(gray_img, clip, grid)
 
-                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-                kernel2 = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
-                thicker = cv2.dilate(enhanced_img, kernel, iterations=1)
-                thicker = cv2.erode(thicker, kernel2, iterations=1)
-                blurred_img = self._blur(thicker, k_size)
+                thicker_img = self._thick_img(enhanced_img, k_size_2)
+                blurred_img = self._blur(thicker_img, k_size)
                 inverted = cv2.bitwise_not(blurred_img)
-                Image.fromarray(inverted).show()
+                # Image.fromarray(inverted).show() # uncomment if you want to see the processed photo
                 return os.path.basename(img_path), inverted
 
             elif img_package == "blue":
-                cropped_img = self._crop_img(loaded_img)
+                cropped_img = self._crop_img(loaded_img, right_k=0.84)
                 gray_img = cropped_img[:, :, 0]
                 enhanced_img = self._enhance_img(gray_img, clip, grid)
                 blurred_img = self._blur(enhanced_img, k_size)
-                Image.fromarray(blurred_img).show()
-            # Image.fromarray(
-            #     blurred_img).show()  # uncomment if you want to see the processed photo
+                # Image.fromarray(
+                #     blurred_img).show()  # uncomment if you want to see the processed photo
                 return os.path.basename(img_path), blurred_img
         except Exception as e:
             raise RuntimeError(
@@ -129,12 +120,30 @@ class ImageProcessor:
         return rotated_img
 
     @staticmethod
+    def _thick_img(enhanced_img, k_size_2):
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        kernel2 = cv2.getStructuringElement(cv2.MORPH_RECT,
+                                            (k_size_2, k_size_2))
+        thicker = cv2.dilate(enhanced_img, kernel, iterations=1)
+        thicker = cv2.erode(thicker, kernel2, iterations=1)
+        return thicker
+
+    @staticmethod
     def _convert_to_gray(cropped_img: np.ndarray) -> np.ndarray:
         """Convert an image to grayscale."""
         try:
             return cv2.cvtColor(cropped_img, cv2.COLOR_BGR2GRAY)
         except Exception as e:
             raise RuntimeError(f"Error in _convert_to_gray: {e}") from e
+
+    @staticmethod
+    def _modify_img_color(cropped_img, b_alpha):
+        b, g, r = cv2.split(cropped_img)
+        r = cv2.addWeighted(r, 0.1, r, 0, 0)
+        g = cv2.addWeighted(g, 0.1, g, 0, 0)
+        b = cv2.addWeighted(b, b_alpha, b, 0, 0)
+        color_modified = cv2.merge([b, g, r])
+        return color_modified
 
     @staticmethod
     def _blur(img: np.ndarray, k_size: int) -> np.ndarray:
@@ -185,14 +194,17 @@ class ICCIDReader:
         reader = easyocr.Reader(['en'], gpu=False, verbose=False)
         results = reader.readtext(img, allowlist="0123456789")
         try:
+            if len(results) > 2:
+                idx = 1
+            else:
+                idx = 0
             confidence = results[1][-1] * 100
-            iccid_p1 = results[0][1] if iccid_no_p1 is None else iccid_no_p1
-            iccid_p2 = results[1][1]
+            iccid_p1 = results[idx][1] if iccid_no_p1 is None else iccid_no_p1
+            iccid_p2 = results[idx+1][1]
             iccid = iccid_p1 + iccid_p2
             print(
-                f"INFO ==============> {iccid} dopasowano z pewnością {round(confidence, 1)}% <===============")
+                f"INFO ==============> {iccid} dopasowano z pewnością {round(confidence, 1)}% {'\u274C' if confidence < 90 else '\u2705'} <===============")
             if self._checksum(iccid) and confidence >= 90:
-                print(f"==============> {iccid} dopasowano z pewnością {round(confidence, 1)}% <===============")
                 return iccid
         except Exception as e:
             print(f"Error in get_iccid: {e}")
@@ -240,7 +252,12 @@ class CSVICCIDUpdater:
         self.csv_path = csv_path
         try:
             self.df = pd.read_csv(csv_path, sep=';',
-                                  dtype={'pcbNumberSerial': str})
+                                  dtype={
+                                      'pcbNumberSerial': str,
+                                      'MSISDN': str,
+                                      'APN': str,
+                                      'ADRES_IP': str,
+                                  })
         except FileNotFoundError:
             raise FileNotFoundError(f"CSV file not found at path: {csv_path}")
         except pd.errors.ParserError as e:
@@ -392,24 +409,3 @@ def find_duplicates(report_updated_path):
             count = text.count(iccid)
             if count > 1:
                 print(iccid)
-
-
-
-
-
-            # if img_package == "silver":
-            #     rotated_img = self._rotate_img(loaded_img, angle=2.5)
-            #     cropped_img = self._crop_img(rotated_img, top_k=0.1, bottom_k=0.9)
-            #     b, g, r = cv2.split(cropped_img)
-            #
-            #     r = cv2.addWeighted(r, 1.3, r, 0, 20)  # wzmocnij czerwony
-            #     g = cv2.addWeighted(g, 0.9, g, 0, 60)  # lekko osłab zielony
-            #     b = cv2.addWeighted(b, 2.0, b, 0, 0)  # zostaw niebieski
-            #
-            #     color_modified = cv2.merge([b, g, r])
-            #
-            #     gray_img = color_modified[:, :, 0]
-            #     enhanced_img = self._enhance_img(gray_img, clip, grid)
-            #     blurred_img = self._blur(enhanced_img, k_size)
-            #     Image.fromarray(color_modified).show()
-            #     return os.path.basename(img_path), blurred_img

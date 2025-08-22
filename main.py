@@ -44,9 +44,16 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--batch",
+        "--start",
         type=int,
-        help="Liczba zdjęć jaką chcemy sprawdzić"
+        default=1,
+        help="Indeks zdjęcia, od którego chcemy zacząć (zaczynamy od 1, nie od 0)"
+    )
+
+    parser.add_argument(
+        "--stop",
+        type=int,
+        help="Indeks zdjęcia, na którym chcemy zakończyć"
     )
 
     parser.add_argument(
@@ -80,7 +87,8 @@ def main():
     path_to_report = args.use_reported_img
     path_to_images = args.path_to_images
     path_to_csv = args.path_to_csv
-    batch = args.batch
+    start = args.start
+    stop = args.stop
 
     img_package = args.img_package
 
@@ -110,13 +118,15 @@ def main():
     iccid_unreadable_counter = 0
     iccid_readable_counter = 0
 
-    num_of_images_to_process = batch if batch else image_processor.count_image_files(
-        path_to_images, file_type) # do poprawy pod kątem batch i zdjec z raportu
+    num_of_images_to_process = stop if stop else image_processor.count_image_files(
+        path_to_images, file_type)
 
     print("Rozpoczęcie przetwarzania zdjęć i aktualizowania pliku csv...")
     for idx, file in enumerate(iter_image_paths, 1):
-        if batch:
-            if idx > batch:
+        if idx < start:
+            continue
+        if stop:
+            if idx > stop:
                 break
         try:
             print(f"{idx}/{num_of_images_to_process}: {os.path.basename(file)}")
@@ -155,4 +165,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # move_images_based_on_report("reports/2025-08-20_11-42-55_logs_iccid_unreadable.txt","/home/mariusz/Pulpit/silver_img", "/home/mariusz/Pulpit/very_bad_img")
+    # move_images_based_on_report("reports/2025-08-21_01-35-12_logs_iccid_unreadable.txt","/home/mariusz/Pulpit/zdjecia_u_12", "/home/mariusz/Pulpit/bad_img")
